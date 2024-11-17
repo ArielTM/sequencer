@@ -15,6 +15,7 @@ pub mod deploy_account;
 pub mod invoke;
 pub mod l1_handler;
 
+// TODO(Arni): Consider moving this to infra utils under test utils.
 /// Returns the path to a file in the resources directory. This assumes the current working
 /// directory has a `resources` folder. The value for file_path should be the path to the required
 /// file in the folder "resources".
