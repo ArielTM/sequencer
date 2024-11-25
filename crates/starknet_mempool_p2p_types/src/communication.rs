@@ -76,7 +76,9 @@ where
         transaction: RpcTransaction,
     ) -> MempoolP2pPropagatorClientResult<()> {
         let request = MempoolP2pPropagatorRequest::AddTransaction(transaction);
+        println!("Sending request: {:?}", request);
         let response = self.send(request).await;
+        println!("sent");
         handle_response_variants!(
             MempoolP2pPropagatorResponse,
             AddTransaction,

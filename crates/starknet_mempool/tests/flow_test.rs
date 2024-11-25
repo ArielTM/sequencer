@@ -1,7 +1,20 @@
+use std::sync::Arc;
+
+use papyrus_network::gossipsub_impl::Topic;
+use papyrus_network::network_manager::{BroadcastTopicChannels, NetworkManager};
+use papyrus_network_types::network_types::BroadcastedMessageMetadata;
+use papyrus_test_utils::{get_rng, GetTestInstance};
 use rstest::{fixture, rstest};
 use starknet_api::block::GasPrice;
+use starknet_api::executable_transaction::AccountTransaction;
+use starknet_api::rpc_transaction::{
+    RpcDeployAccountTransaction,
+    RpcInvokeTransaction,
+    RpcTransaction,
+};
 use starknet_api::{contract_address, nonce};
 use starknet_mempool::add_tx_input;
+use starknet_mempool::communication::MempoolCommunicationWrapper;
 use starknet_mempool::mempool::Mempool;
 use starknet_mempool::test_utils::{
     add_tx,
@@ -9,9 +22,21 @@ use starknet_mempool::test_utils::{
     commit_block,
     get_txs_and_assert_expected,
 };
+use starknet_mempool_p2p::propagator::MempoolP2pPropagator;
+use starknet_mempool_p2p::MEMPOOL_TOPIC;
+use starknet_mempool_p2p_types::communication::{
+    LocalMempoolP2pPropagatorClient,
+    MempoolP2pPropagatorRequest,
+    MempoolP2pPropagatorRequestAndResponseSender,
+    MempoolP2pPropagatorResponse,
+    SharedMempoolP2pPropagatorClient,
+};
+use starknet_mempool_types::communication::AddTransactionArgsWrapper;
 use starknet_mempool_types::errors::MempoolError;
-
+use starknet_sequencer_infra::component_server::{ComponentServerStarter, LocalComponentServer};
 // Fixtures.
+use tokio::sync::mpsc::channel;
+use tokio::task;
 
 #[fixture]
 fn mempool() -> Mempool {
@@ -312,4 +337,92 @@ fn test_update_gas_price_threshold(mut mempool: Mempool) {
 
     mempool.update_gas_price_threshold(GasPrice(10));
     get_txs_and_assert_expected(&mut mempool, 2, &[input_gas_price_20.tx]);
+}
+
+#[rstest]
+#[tokio::test]
+async fn test_tx_sent_to_p2p(mempool: Mempool) {
+    let (tx_mempool_p2p_propagator, mut rx_mempool_p2p_propagator) =
+        channel::<MempoolP2pPropagatorRequestAndResponseSender>(32);
+    let mempool_p2p_propagator_client: SharedMempoolP2pPropagatorClient =
+        Arc::new(LocalMempoolP2pPropagatorClient::new(tx_mempool_p2p_propagator));
+    let mut mempool_wrapper =
+        MempoolCommunicationWrapper::new(mempool, mempool_p2p_propagator_client);
+
+    let mut placeholder_network_manager = NetworkManager::new(Default::default(), None);
+    let BroadcastTopicChannels { broadcast_topic_client, .. } = placeholder_network_manager
+        .register_broadcast_topic(Topic::new(MEMPOOL_TOPIC), 32)
+        .expect("Failed to register broadcast topic");
+    let mempool_p2p_propagator = MempoolP2pPropagator::new(broadcast_topic_client.clone());
+    let mut mempool_p2p_propagator_server =
+        LocalComponentServer::new(mempool_p2p_propagator, rx_mempool_p2p_propagator);
+
+    task::spawn(async move {
+        let _ = mempool_p2p_propagator_server.start().await;
+    });
+
+    println!("cp1");
+    // add_tx_input! creates an Invoke Transaction
+    let tx_1_args = add_tx_input!(tx_hash: 1, address: "0x0", tx_nonce: 2, account_nonce: 2);
+    let new_tx_args =
+        AddTransactionArgsWrapper { args: tx_1_args.clone(), p2p_message_metadata: None };
+
+    println!("cp2");
+
+    let tx_2_args = add_tx_input!(tx_hash: 2, address: "0x0", tx_nonce: 3, account_nonce: 2);
+    let expected_message_metadata = BroadcastedMessageMetadata::get_test_instance(&mut get_rng());
+    let _propagated_tx_args = AddTransactionArgsWrapper {
+        args: tx_2_args.clone(),
+        p2p_message_metadata: Some(expected_message_metadata.clone()),
+    };
+
+    println!("finished setup");
+
+    mempool_wrapper.add_tx(new_tx_args).await.unwrap();
+
+    println!("Added new tx to mempool");
+
+    // let new_tx_response = mempool_p2p_propagator_server.recv().await.unwrap();
+
+    // println!("Received new tx response");
+
+    // if let MempoolP2pPropagatorRequest::AddTransaction(rpc_transaction) = new_tx_response.request
+    // {     let converted_tx = match tx_1_args.tx {
+    //         AccountTransaction::Declare(_declare_tx) => {
+    //             panic!(
+    //                 "No implementation for converting DeclareTransaction to an
+    // RpcTransaction"
+    //             )
+    //         }
+    //         AccountTransaction::DeployAccount(deploy_account_transaction) => {
+    //             RpcTransaction::DeployAccount(RpcDeployAccountTransaction::V3(
+    //                 deploy_account_transaction.clone().into(),
+    //             ))
+    //         }
+    //         AccountTransaction::Invoke(invoke_transaction) => {
+    //
+    // RpcTransaction::Invoke(RpcInvokeTransaction::V3(invoke_transaction.clone().into()))
+    //         }
+    //     };
+    //     assert_eq!(rpc_transaction, converted_tx);
+    //     println!("New tx matches")
+    // } else {
+    //     panic!("Expected AddTransaction request, got {:?}", new_tx_response.request);
+    // }
+    // mempool_wrapper.add_tx(propagated_tx_args).await.unwrap();
+
+    // println!("Added propagated tx to mempool");
+
+    // let propagated_tx_response = rx_mempool_p2p_propagator.recv().await.unwrap();
+
+    // println!("Received propagated tx response");
+
+    // if let MempoolP2pPropagatorRequest::ContinuePropagation(message_metadata) =
+    //     propagated_tx_response.request
+    // {
+    //     assert_eq!(message_metadata, expected_message_metadata);
+    //     println!("Message metadata matches")
+    // } else {
+    //     panic!("Expected ContinuePropagation request, got {:?}", propagated_tx_response.request);
+    // }
 }

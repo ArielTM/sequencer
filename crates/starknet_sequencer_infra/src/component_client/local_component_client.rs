@@ -90,10 +90,15 @@ where
     Response: Send + Sync + Serialize + DeserializeOwned,
 {
     async fn send(&self, request: Request) -> ClientResult<Response> {
+        println!("Entered LocalComponentClient::send");
         let (res_tx, mut res_rx) = channel::<Response>(1);
         let request_and_res_tx = ComponentRequestAndResponseSender { request, tx: res_tx };
+        println!("Sending request");
         self.tx.send(request_and_res_tx).await.expect("Outbound connection should be open.");
-        Ok(res_rx.recv().await.expect("Inbound connection should be open."))
+        println!("Sent request");
+        let recv = res_rx.recv().await.expect("Inbound connection should be open.");
+        println!("Received response");
+        Ok(recv)
     }
 }
 

@@ -48,22 +48,28 @@ impl MempoolCommunicationWrapper {
         message_metadata: Option<BroadcastedMessageMetadata>,
         tx: AccountTransaction,
     ) -> MempoolResult<()> {
+        println!("Sending tx to p2p: {:?}\n", tx);
         match message_metadata {
-            Some(message_metadata) => self
-                .mempool_p2p_propagator_client
-                .continue_propagation(message_metadata)
-                .await
-                .map_err(|_| MempoolError::P2pPropagatorClientError { tx_hash: tx.tx_hash() }),
+            Some(message_metadata) => {
+                println!("Entered the Some match arm\n");
+                self.mempool_p2p_propagator_client
+                    .continue_propagation(message_metadata)
+                    .await
+                    .map_err(|_| MempoolError::P2pPropagatorClientError { tx_hash: tx.tx_hash() })
+            }
             None => {
+                println!("Entered the None match arm\n");
                 let tx_hash = tx.tx_hash();
                 match tx {
-                    AccountTransaction::Invoke(invoke_tx) => self
-                        .mempool_p2p_propagator_client
-                        .add_transaction(RpcTransaction::Invoke(RpcInvokeTransaction::V3(
-                            invoke_tx.into(),
-                        )))
-                        .await
-                        .map_err(|_| MempoolError::P2pPropagatorClientError { tx_hash })?,
+                    AccountTransaction::Invoke(invoke_tx) => {
+                        println!("Sending invoke tx to p2p: {:?}\n", invoke_tx);
+                        self.mempool_p2p_propagator_client
+                            .add_transaction(RpcTransaction::Invoke(RpcInvokeTransaction::V3(
+                                invoke_tx.into(),
+                            )))
+                            .await
+                            .map_err(|_| MempoolError::P2pPropagatorClientError { tx_hash })?
+                    }
                     AccountTransaction::DeployAccount(deploy_account_tx) => self
                         .mempool_p2p_propagator_client
                         .add_transaction(RpcTransaction::DeployAccount(
@@ -78,14 +84,17 @@ impl MempoolCommunicationWrapper {
         }
     }
 
-    async fn add_tx(&mut self, args_wrapper: AddTransactionArgsWrapper) -> MempoolResult<()> {
+    pub async fn add_tx(&mut self, args_wrapper: AddTransactionArgsWrapper) -> MempoolResult<()> {
         self.mempool.add_tx(args_wrapper.args.clone())?;
         // TODO: Verify that only transactions that were added to the mempool are sent.
         // TODO: handle declare correctly and remove this match.
-        match args_wrapper.args.tx {
+        println!("Added tx to mempool: {:?}", args_wrapper.args.tx);
+        let x = match args_wrapper.args.tx {
             AccountTransaction::Declare(_) => Ok(()),
             _ => self.send_tx_to_p2p(args_wrapper.p2p_message_metadata, args_wrapper.args.tx).await,
-        }
+        };
+        println!("finished add_tx\n");
+        return x;
     }
 
     fn commit_block(&mut self, args: CommitBlockArgs) -> MempoolResult<()> {

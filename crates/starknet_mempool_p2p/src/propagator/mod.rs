@@ -30,8 +30,10 @@ impl ComponentRequestHandler<MempoolP2pPropagatorRequest, MempoolP2pPropagatorRe
         &mut self,
         request: MempoolP2pPropagatorRequest,
     ) -> MempoolP2pPropagatorResponse {
+        println!("handle_request: {:?}", request);
         match request {
             MempoolP2pPropagatorRequest::AddTransaction(transaction) => {
+                println!("AddTransaction: {:?}", transaction);
                 let result = self
                     .broadcast_topic_client
                     .broadcast_message(RpcTransactionWrapper(transaction))
@@ -40,6 +42,7 @@ impl ComponentRequestHandler<MempoolP2pPropagatorRequest, MempoolP2pPropagatorRe
                 MempoolP2pPropagatorResponse::AddTransaction(result)
             }
             MempoolP2pPropagatorRequest::ContinuePropagation(propagation_manager) => {
+                println!("ContinuePropagation: {:?}", propagation_manager);
                 let result = self
                     .broadcast_topic_client
                     .continue_propagation(&propagation_manager)
