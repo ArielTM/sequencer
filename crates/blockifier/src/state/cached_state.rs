@@ -105,6 +105,15 @@ impl<S: StateReader> CachedState<S> {
         }
         Ok(())
     }
+
+    pub fn set_nonce_at(
+        &mut self,
+        contract_address: ContractAddress,
+        nonce: Nonce,
+    ) -> StateResult<()> {
+        self.cache.get_mut().set_nonce_value(contract_address, nonce);
+        Ok(())
+    }
 }
 
 impl<S: StateReader> UpdatableState for CachedState<S> {
